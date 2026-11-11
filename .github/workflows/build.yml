@@ -156,17 +156,13 @@ jobs:
         run: |
           echo "Testing RCON..."
 
-          # Install mcrcon for testing
-          sudo apt-get update && sudo apt-get install -y build-essential git
-          git clone https://github.com/Tiiffi/mcrcon.git /tmp/mcrcon
-          cd /tmp/mcrcon && make && sudo cp mcrcon /usr/local/bin/
-
+          # Use the image's client against the published host port, without installing host packages.
           # Test RCON connection with retry
           max_attempts=5
           attempt=0
           while [ $attempt -lt $max_attempts ]; do
             echo "RCON attempt $((attempt + 1))/$max_attempts..."
-            result=$(mcrcon -H 127.0.0.1 -P 25575 -p testpassword "list" 2>&1)
+            result=$(docker run --rm --network host --entrypoint mcrcon lumo-server:test -H 127.0.0.1 -P 25575 -p testpassword "list" 2>&1)
             if echo "$result" | grep -q "players online"; then
               echo "✓ RCON working: $result"
               exit 0
@@ -254,7 +250,7 @@ jobs:
           echo "Testing server health..."
 
           # Check server responds to version command
-          result=$(mcrcon -H 127.0.0.1 -P 25575 -p testpassword "version" 2>&1)
+          result=$(docker run --rm --network host --entrypoint mcrcon lumo-server:test -H 127.0.0.1 -P 25575 -p testpassword "version" 2>&1)
           echo "Version output: $result"
           if echo "$result" | grep -qi "paper\|1\.21"; then
             echo "✓ Server running Paper"
@@ -263,7 +259,7 @@ jobs:
           fi
 
           # Check TPS
-          result=$(mcrcon -H 127.0.0.1 -P 25575 -p testpassword "tps" 2>&1)
+          result=$(docker run --rm --network host --entrypoint mcrcon lumo-server:test -H 127.0.0.1 -P 25575 -p testpassword "tps" 2>&1)
           echo "Server TPS: $result"
 
       - name: Test Economy setup
@@ -342,7 +338,7 @@ jobs:
           echo "Testing Multiverse..."
 
           # List worlds via RCON
-          result=$(mcrcon -H 127.0.0.1 -P 25575 -p testpassword "mv list" 2>&1)
+          result=$(docker run --rm --network host --entrypoint mcrcon lumo-server:test -H 127.0.0.1 -P 25575 -p testpassword "mv list" 2>&1)
           echo "Multiverse worlds: $result"
 
           if echo "$result" | grep -qi "world"; then
