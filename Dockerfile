@@ -37,11 +37,18 @@ RUN mkdir -p plugins datapacks
 
 ARG MC_VERSION
 
-# Download Paper server
+# Download Paper server through the v3 API; reject HTTP errors and verify the JAR.
 RUN echo "Downloading Paper server..." && \
-    PAPER_BUILD=$(curl -s "https://api.papermc.io/v2/projects/paper/versions/${MC_VERSION}/builds" | jq -r '.builds[-1].build') && \
-    curl -sSL -o /downloads/paper.jar \
-    "https://api.papermc.io/v2/projects/paper/versions/${MC_VERSION}/builds/${PAPER_BUILD}/downloads/paper-${MC_VERSION}-${PAPER_BUILD}.jar"
+    USER_AGENT="lumo-server (https://github.com/lumo-minecraft/lumo-server)" && \
+    curl -fsSL -A "$USER_AGENT" \
+        "https://fill.papermc.io/v3/projects/paper/versions/${MC_VERSION}/builds" \
+        -o /tmp/paper-builds.json && \
+    PAPER_DOWNLOAD=$(jq -ce 'first(.[] | select(.channel == "STABLE") | .downloads."server:default")' /tmp/paper-builds.json) && \
+    PAPER_URL=$(printf '%s' "$PAPER_DOWNLOAD" | jq -er '.url | select(type == "string" and startswith("https://fill-data.papermc.io/"))') && \
+    PAPER_SHA256=$(printf '%s' "$PAPER_DOWNLOAD" | jq -er '.checksums.sha256 | select(type == "string" and test("^[a-f0-9]{64}$"))') && \
+    curl -fsSL -A "$USER_AGENT" -o /downloads/paper.jar "$PAPER_URL" && \
+    printf '%s  /downloads/paper.jar\n' "$PAPER_SHA256" | sha256sum -c - && \
+    rm /tmp/paper-builds.json
 
 # Download script for Modrinth
 COPY <<'EOF' /usr/local/bin/download_modrinth
