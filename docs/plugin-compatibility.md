@@ -11,3 +11,5 @@ CI queries registered plugin versions over RCON and rejects disable events; down
 Delivery and acceptance: https://linear.app/seventwo/issue/ST-528 and https://github.com/lumo-minecraft/lumo-server/pull/29.
 
 BlueMap 5.x requires vertical bounds inside `render-mask`; top-level `min-y` and `max-y` cause configuration loading to fail. CI requires the BlueMap HTTP endpoint to respond, since an enable log line and plugin registration can survive an asynchronous load failure.
+
+During initial world generation, RCON can return an empty plugin-version reply while the plugin remains active. CI retries empty replies at most five times; nonempty missing-plugin replies and disable events still fail immediately.

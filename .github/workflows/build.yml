@@ -211,7 +211,14 @@ jobs:
           # Query registered plugins and reject disable events after startup.
           for plugin in "${expected_plugins[@]}"; do
             [ "$plugin" = "QuickShop" ] && plugin="QuickShop-Hikari"
-            result=$(docker run --rm --network host --entrypoint mcrcon lumo-server:test -H 127.0.0.1 -P 25575 -p testpassword "bukkit:version $plugin")
+            # World generation can briefly leave an RCON command with an empty reply.
+            # Retry only empty replies; never hide a missing plugin or a disable event.
+            result=""
+            for attempt in 1 2 3 4 5; do
+              result=$(docker run --rm --network host --entrypoint mcrcon lumo-server:test -H 127.0.0.1 -P 25575 -p testpassword "bukkit:version $plugin")
+              [ -n "$result" ] && break
+              [ "$attempt" -eq 5 ] || sleep 3
+            done
             echo "$result"
             if ! grep -Fqi "$plugin version" <<< "$result" || grep -Fqi "Disabling $plugin" <<< "$logs"; then
               echo "✗ $plugin is missing or disabled"
