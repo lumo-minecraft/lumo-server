@@ -312,10 +312,18 @@ jobs:
             exit 1
           fi
 
-          # Check if web server started
-          if grep -qi "BlueMap.*webserver\|Webserver.*started\|:8100" <<< "$logs"; then
-            echo "✓ BlueMap web server started"
-          fi
+          # BlueMap may stay registered after its asynchronous load fails.
+          # Require the actual service, rather than accepting an enable log line.
+          for attempt in $(seq 1 36); do
+            if docker exec test-server curl -fsS http://127.0.0.1:8100/ >/dev/null; then
+              echo "✓ BlueMap web server responds"
+              exit 0
+            fi
+            sleep 5
+          done
+          docker logs test-server
+          echo "✗ BlueMap web server did not become ready"
+          exit 1
 
       - name: Test Multiverse worlds
         run: |
@@ -350,6 +358,8 @@ jobs:
           echo ""
 
           logs=$(docker logs test-server 2>&1) || true
+
+          echo "$logs"
 
           echo "Plugin Status:"
           echo "--------------"

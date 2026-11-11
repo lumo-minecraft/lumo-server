@@ -73,7 +73,7 @@ echo "✓ $PROJECT"
 EOF
 RUN chmod +x /usr/local/bin/download_modrinth
 
-# Explicit pins: FancyNpcs 2.9.2 targets Java 21; EssentialsX 2.21.2 uses
+# Explicit pins: FancyNpcs 2.9.2 targets Java 21; EssentialsX 2.22.0 uses
 # representative Minecraft patch versions in its metadata. CI verifies runtime compatibility.
 # Other plugins must advertise the requested Minecraft version.
 # Download all Modrinth plugins in parallel
@@ -95,7 +95,7 @@ viabackwards paper auto
 voidworld paper auto
 simpledeathchest paper auto
 luckperms paper auto
-essentialsx paper Oa9ZDzZq
+essentialsx paper nY6VN1XH
 fancynpcs paper aBqGwA1m
 quickshop-hikari paper auto
 PLUGINS
