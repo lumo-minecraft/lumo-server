@@ -54,50 +54,61 @@ RUN echo "Downloading Paper server..." && \
 COPY <<'EOF' /usr/local/bin/download_modrinth
 #!/bin/sh
 set -e
-PROJECT=$1; MC_VERSION=$2; LOADER=${3:-paper}
+PROJECT=$1; MC_VERSION=$2; LOADER=${3:-paper}; VERSION_ID=${4:-}; [ "$VERSION_ID" = "auto" ] && VERSION_ID=""
 echo "Downloading $PROJECT..."
-VERSION_DATA=$(curl -sS "https://api.modrinth.com/v2/project/$PROJECT/version?loaders=%5B%22$LOADER%22%5D&game_versions=%5B%22$MC_VERSION%22%5D" | jq -r '.[0]')
-[ "$VERSION_DATA" = "null" ] && VERSION_DATA=$(curl -sS "https://api.modrinth.com/v2/project/$PROJECT/version?loaders=%5B%22$LOADER%22%5D" | jq -r '.[0]')
-FILE_URL=$(echo "$VERSION_DATA" | jq -r '.files[0].url')
-FILE_NAME=$(echo "$VERSION_DATA" | jq -r '.files[0].filename')
-curl -sSL -o "/downloads/plugins/$FILE_NAME" "$FILE_URL"
+if [ -n "$VERSION_ID" ]; then
+    VERSION_DATA=$(curl -fsS "https://api.modrinth.com/v2/version/$VERSION_ID")
+    echo "$VERSION_DATA" | jq -e --arg mc "$MC_VERSION" --arg loader "$LOADER" \
+        '(.loaders | index($loader)) != null' >/dev/null
+else
+    VERSION_DATA=$(curl -fsS "https://api.modrinth.com/v2/project/$PROJECT/version?loaders=%5B%22$LOADER%22%5D&game_versions=%5B%22$MC_VERSION%22%5D" | jq -ce 'first(.[] | select(.version_type == "release"))')
+fi
+FILE_DATA=$(echo "$VERSION_DATA" | jq -ce 'first(.files[] | select(.primary))')
+FILE_URL=$(echo "$FILE_DATA" | jq -er '.url')
+FILE_NAME=$(echo "$FILE_DATA" | jq -er '.filename')
+FILE_SHA512=$(echo "$FILE_DATA" | jq -er '.hashes.sha512 | select(test("^[a-f0-9]{128}$"))')
+curl -fsSL -o "/downloads/plugins/$FILE_NAME" "$FILE_URL"
+printf '%s  %s\n' "$FILE_SHA512" "/downloads/plugins/$FILE_NAME" | sha512sum -c -
 echo "✓ $PROJECT"
 EOF
 RUN chmod +x /usr/local/bin/download_modrinth
 
+# Explicit pins: FancyNpcs 2.9.2 targets Java 21; EssentialsX 2.21.2 uses
+# representative Minecraft patch versions in its metadata. CI verifies runtime compatibility.
+# Other plugins must advertise the requested Minecraft version.
 # Download all Modrinth plugins in parallel
-RUN cat <<'PLUGINS' | parallel -j8 --colsep ' ' download_modrinth {1} ${MC_VERSION} {2}
-multiverse-core paper
-multiverse-portals paper
-multiverse-netherportals paper
-multiverse-signportals paper
-multiverse-inventories paper
-bluemap paper
-fastasyncworldedit paper
-worldguard paper
-simple-voice-chat paper
-chunker paper
-lagfixer paper
-coreprotect paper
-viaversion paper
-viabackwards paper
-voidworld paper
-simpledeathchest paper
-luckperms paper
-essentialsx paper
-fancynpcs paper
-quickshop-hikari paper
+RUN cat <<'PLUGINS' | parallel -j8 --colsep ' ' download_modrinth {1} ${MC_VERSION} {2} {3}
+multiverse-core paper auto
+multiverse-portals paper auto
+multiverse-netherportals paper auto
+multiverse-signportals paper auto
+multiverse-inventories paper auto
+bluemap paper auto
+fastasyncworldedit paper auto
+worldguard paper auto
+simple-voice-chat paper auto
+chunker paper auto
+lagfixer paper auto
+coreprotect paper auto
+viaversion paper auto
+viabackwards paper auto
+voidworld paper auto
+simpledeathchest paper auto
+luckperms paper auto
+essentialsx paper Oa9ZDzZq
+fancynpcs paper aBqGwA1m
+quickshop-hikari paper auto
 PLUGINS
 
 # Download from other sources
-RUN curl -sSL -o /downloads/plugins/Vault.jar \
+RUN curl -fsSL -o /downloads/plugins/Vault.jar \
     "https://api.spiget.org/v2/resources/34315/download" && echo "✓ Vault"
 
-RUN curl -sSL -o /downloads/plugins/SmoothTimber.jar \
+RUN curl -fsSL -o /downloads/plugins/SmoothTimber.jar \
     "https://api.spiget.org/v2/resources/39965/download" && echo "✓ SmoothTimber"
 
 # Shopkeepers for NPC-based admin shops (works with FancyNpcs or vanilla villagers)
-RUN curl -sSL -o /downloads/plugins/Shopkeepers.jar \
+RUN curl -fsSL -o /downloads/plugins/Shopkeepers.jar \
     "https://raw.githubusercontent.com/Shopkeepers/Repository/main/releases/com/nisovin/shopkeepers/Shopkeepers/2.24.0/Shopkeepers-2.24.0.jar" && echo "✓ Shopkeepers"
 
 # PlotSquared is built from source in plotsquared-builder stage
