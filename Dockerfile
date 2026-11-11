@@ -58,15 +58,15 @@ PROJECT=$1; MC_VERSION=$2; LOADER=${3:-paper}; VERSION_ID=${4:-}; [ "$VERSION_ID
 echo "Downloading $PROJECT..."
 if [ -n "$VERSION_ID" ]; then
     VERSION_DATA=$(curl -fsS "https://api.modrinth.com/v2/version/$VERSION_ID")
-    echo "$VERSION_DATA" | jq -e --arg mc "$MC_VERSION" --arg loader "$LOADER" \
+    printf '%s\n' "$VERSION_DATA" | jq -e --arg mc "$MC_VERSION" --arg loader "$LOADER" \
         '(.loaders | index($loader)) != null' >/dev/null
 else
     VERSION_DATA=$(curl -fsS "https://api.modrinth.com/v2/project/$PROJECT/version?loaders=%5B%22$LOADER%22%5D&game_versions=%5B%22$MC_VERSION%22%5D" | jq -ce 'first(.[] | select(.version_type == "release"))')
 fi
-FILE_DATA=$(echo "$VERSION_DATA" | jq -ce 'first(.files[] | select(.primary))')
-FILE_URL=$(echo "$FILE_DATA" | jq -er '.url')
-FILE_NAME=$(echo "$FILE_DATA" | jq -er '.filename')
-FILE_SHA512=$(echo "$FILE_DATA" | jq -er '.hashes.sha512 | select(test("^[a-f0-9]{128}$"))')
+FILE_DATA=$(printf '%s\n' "$VERSION_DATA" | jq -ce 'first(.files[] | select(.primary))')
+FILE_URL=$(printf '%s\n' "$FILE_DATA" | jq -er '.url')
+FILE_NAME=$(printf '%s\n' "$FILE_DATA" | jq -er '.filename')
+FILE_SHA512=$(printf '%s\n' "$FILE_DATA" | jq -er '.hashes.sha512 | select(test("^[a-f0-9]{128}$"))')
 curl -fsSL -o "/downloads/plugins/$FILE_NAME" "$FILE_URL"
 printf '%s  %s\n' "$FILE_SHA512" "/downloads/plugins/$FILE_NAME" | sha512sum -c -
 echo "✓ $PROJECT"
@@ -117,8 +117,8 @@ RUN echo "✓ PlotSquared (built from source)"
 
 # Download Terralith datapack
 RUN VERSION_DATA=$(curl -sS "https://api.modrinth.com/v2/project/terralith/version?loaders=%5B%22datapack%22%5D&game_versions=%5B%22${MC_VERSION}%22%5D" | jq -r '.[0]') && \
-    FILE_URL=$(echo "$VERSION_DATA" | jq -r '.files[0].url') && \
-    FILE_NAME=$(echo "$VERSION_DATA" | jq -r '.files[0].filename') && \
+    FILE_URL=$(printf '%s\n' "$VERSION_DATA" | jq -r '.files[0].url') && \
+    FILE_NAME=$(printf '%s\n' "$VERSION_DATA" | jq -r '.files[0].filename') && \
     curl -sSL -o "/downloads/datapacks/$FILE_NAME" "$FILE_URL" && echo "✓ Terralith"
 
 RUN echo "=== Downloaded ===" && ls -la /downloads/plugins/ && ls -la /downloads/datapacks/
