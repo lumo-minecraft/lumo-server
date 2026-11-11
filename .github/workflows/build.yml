@@ -37,14 +37,14 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Extract metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
@@ -53,7 +53,7 @@ jobs:
             type=sha,prefix=
 
       - name: Build image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           load: true
@@ -68,7 +68,7 @@ jobs:
           docker save lumo-server:test -o /tmp/lumo-server.tar
 
       - name: Upload image artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: docker-image
           path: /tmp/lumo-server.tar
@@ -81,10 +81,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Download image artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: docker-image
           path: /tmp
@@ -138,7 +138,7 @@ jobs:
           timeout=300
           elapsed=0
           while [ $elapsed -lt $timeout ]; do
-            if docker logs test-server 2>&1 | grep -q "Done ("; then
+            if grep -q "Done (" <<< "$(docker logs test-server 2>&1)"; then
               echo "Server started successfully!"
               echo "Waiting 10 seconds for RCON to initialize..."
               sleep 10
@@ -156,18 +156,14 @@ jobs:
         run: |
           echo "Testing RCON..."
 
-          # Install mcrcon for testing
-          sudo apt-get update && sudo apt-get install -y build-essential git
-          git clone https://github.com/Tiiffi/mcrcon.git /tmp/mcrcon
-          cd /tmp/mcrcon && make && sudo cp mcrcon /usr/local/bin/
-
+          # Use the image's client against the published host port, without installing host packages.
           # Test RCON connection with retry
           max_attempts=5
           attempt=0
           while [ $attempt -lt $max_attempts ]; do
             echo "RCON attempt $((attempt + 1))/$max_attempts..."
-            result=$(mcrcon -H 127.0.0.1 -P 25575 -p testpassword "list" 2>&1)
-            if echo "$result" | grep -q "players online"; then
+            result=$(docker run --rm --network host --entrypoint mcrcon lumo-server:test -H 127.0.0.1 -P 25575 -p testpassword "list" 2>&1)
+            if grep -q "players online" <<< "$result"; then
               echo "✓ RCON working: $result"
               exit 0
             fi
@@ -187,6 +183,10 @@ jobs:
           # List of expected plugins (updated for our custom image)
           expected_plugins=(
             "Multiverse-Core"
+            "Multiverse-Portals"
+            "Multiverse-NetherPortals"
+            "Multiverse-SignPortals"
+            "Multiverse-Inventories"
             "BlueMap"
             "FastAsyncWorldEdit"
             "WorldGuard"
@@ -208,33 +208,20 @@ jobs:
           logs=$(docker logs test-server 2>&1)
           failed=0
 
+          # Query registered plugins and reject disable events after startup.
           for plugin in "${expected_plugins[@]}"; do
-            # Handle special cases
-            if [ "$plugin" = "LagFixer" ]; then
-              if echo "$logs" | grep -qi "LagFixer\|⚡.*lag"; then
-                echo "✓ $plugin loaded"
-              else
-                echo "✗ $plugin NOT found in logs"
-                failed=1
-              fi
-            elif [ "$plugin" = "FastAsyncWorldEdit" ]; then
-              if echo "$logs" | grep -qi "FastAsyncWorldEdit\|FAWE"; then
-                echo "✓ $plugin loaded"
-              else
-                echo "✗ $plugin NOT found in logs"
-                failed=1
-              fi
-            elif [ "$plugin" = "QuickShop" ]; then
-              if echo "$logs" | grep -qi "QuickShop\|Hikari"; then
-                echo "✓ $plugin loaded"
-              else
-                echo "✗ $plugin NOT found in logs"
-                failed=1
-              fi
-            elif echo "$logs" | grep -qi "\[$plugin\]"; then
-              echo "✓ $plugin loaded"
-            else
-              echo "✗ $plugin NOT found in logs"
+            [ "$plugin" = "QuickShop" ] && plugin="QuickShop-Hikari"
+            # World generation can briefly leave an RCON command with an empty reply.
+            # Retry only empty replies; never hide a missing plugin or a disable event.
+            result=""
+            for attempt in 1 2 3 4 5; do
+              result=$(docker run --rm --network host --entrypoint mcrcon lumo-server:test -H 127.0.0.1 -P 25575 -p testpassword "bukkit:version $plugin")
+              [ -n "$result" ] && break
+              [ "$attempt" -eq 5 ] || sleep 3
+            done
+            echo "$result"
+            if ! grep -Fqi "$plugin version" <<< "$result" || grep -Fqi "Disabling $plugin" <<< "$logs"; then
+              echo "✗ $plugin is missing or disabled"
               failed=1
             fi
           done
@@ -254,16 +241,16 @@ jobs:
           echo "Testing server health..."
 
           # Check server responds to version command
-          result=$(mcrcon -H 127.0.0.1 -P 25575 -p testpassword "version" 2>&1)
+          result=$(docker run --rm --network host --entrypoint mcrcon lumo-server:test -H 127.0.0.1 -P 25575 -p testpassword "version" 2>&1)
           echo "Version output: $result"
-          if echo "$result" | grep -qi "paper\|1\.21"; then
+          if grep -qi "paper\|1\.21" <<< "$result"; then
             echo "✓ Server running Paper"
           else
             echo "Warning: Unexpected version output, but server is responding"
           fi
 
           # Check TPS
-          result=$(mcrcon -H 127.0.0.1 -P 25575 -p testpassword "tps" 2>&1)
+          result=$(docker run --rm --network host --entrypoint mcrcon lumo-server:test -H 127.0.0.1 -P 25575 -p testpassword "tps" 2>&1)
           echo "Server TPS: $result"
 
       - name: Test Economy setup
@@ -271,11 +258,11 @@ jobs:
           echo "Testing Economy configuration..."
           logs=$(docker logs test-server 2>&1)
 
-          if echo "$logs" | grep -qi "Vault.*Economy\|Economy.*hooked"; then
+          if grep -qi "Vault.*Economy\|Economy.*hooked" <<< "$logs"; then
             echo "✓ Vault economy integration detected"
           fi
 
-          if echo "$logs" | grep -qi "Essentials.*economy\|EssentialsX.*economy"; then
+          if grep -qi "Essentials.*economy\|EssentialsX.*economy" <<< "$logs"; then
             echo "✓ Essentials economy enabled"
           fi
 
@@ -285,7 +272,7 @@ jobs:
           logs=$(docker logs test-server 2>&1)
 
           # Check FancyNpcs
-          if echo "$logs" | grep -qi "FancyNpcs.*Enabling\|FancyNpcs.*enabled"; then
+          if grep -qi "FancyNpcs.*Enabling\|FancyNpcs.*enabled" <<< "$logs"; then
             echo "✓ FancyNpcs enabled"
           else
             echo "✗ FancyNpcs not enabled"
@@ -293,7 +280,7 @@ jobs:
           fi
 
           # Check Shopkeepers
-          if echo "$logs" | grep -qi "Shopkeepers.*Enabling\|Shopkeepers.*enabled"; then
+          if grep -qi "Shopkeepers.*Enabling\|Shopkeepers.*enabled" <<< "$logs"; then
             echo "✓ Shopkeepers enabled"
           else
             echo "✗ Shopkeepers not enabled"
@@ -301,7 +288,7 @@ jobs:
           fi
 
           # Check QuickShop
-          if echo "$logs" | grep -qi "QuickShop.*Enabling\|QuickShop.*enabled\|Hikari"; then
+          if grep -qi "QuickShop.*Enabling\|QuickShop.*enabled\|Hikari" <<< "$logs"; then
             echo "✓ QuickShop-Hikari enabled"
           else
             echo "✗ QuickShop-Hikari not enabled"
@@ -313,7 +300,7 @@ jobs:
           echo "Testing PlotSquared..."
           logs=$(docker logs test-server 2>&1)
 
-          if echo "$logs" | grep -qi "PlotSquared.*Enabling\|PlotSquared.*enabled"; then
+          if grep -qi "PlotSquared.*Enabling\|PlotSquared.*enabled" <<< "$logs"; then
             echo "✓ PlotSquared enabled"
           else
             echo "✗ PlotSquared not enabled"
@@ -325,27 +312,35 @@ jobs:
           echo "Testing BlueMap..."
           logs=$(docker logs test-server 2>&1)
 
-          if echo "$logs" | grep -qi "BlueMap.*Enabling\|BlueMap.*enabled"; then
+          if grep -qi "BlueMap.*Enabling\|BlueMap.*enabled" <<< "$logs"; then
             echo "✓ BlueMap enabled"
           else
             echo "✗ BlueMap not enabled"
             exit 1
           fi
 
-          # Check if web server started
-          if echo "$logs" | grep -qi "BlueMap.*webserver\|Webserver.*started\|:8100"; then
-            echo "✓ BlueMap web server started"
-          fi
+          # BlueMap may stay registered after its asynchronous load fails.
+          # Require the actual service, rather than accepting an enable log line.
+          for attempt in $(seq 1 36); do
+            if docker exec test-server curl -fsS http://127.0.0.1:8100/ >/dev/null; then
+              echo "✓ BlueMap web server responds"
+              exit 0
+            fi
+            sleep 5
+          done
+          docker logs test-server
+          echo "✗ BlueMap web server did not become ready"
+          exit 1
 
       - name: Test Multiverse worlds
         run: |
           echo "Testing Multiverse..."
 
           # List worlds via RCON
-          result=$(mcrcon -H 127.0.0.1 -P 25575 -p testpassword "mv list" 2>&1)
+          result=$(docker run --rm --network host --entrypoint mcrcon lumo-server:test -H 127.0.0.1 -P 25575 -p testpassword "mv list" 2>&1)
           echo "Multiverse worlds: $result"
 
-          if echo "$result" | grep -qi "world"; then
+          if grep -qi "world" <<< "$result"; then
             echo "✓ Multiverse listing worlds"
           fi
 
@@ -371,6 +366,8 @@ jobs:
 
           logs=$(docker logs test-server 2>&1) || true
 
+          echo "$logs"
+
           echo "Plugin Status:"
           echo "--------------"
           plugins=(
@@ -386,7 +383,7 @@ jobs:
           for plugin in "${plugins[@]}"; do
             # Handle special cases
             if [ "$plugin" = "LagFixer" ]; then
-              if echo "$logs" | grep -qi "LagFixer\|⚡"; then
+              if grep -qi "LagFixer\|⚡" <<< "$logs"; then
                 echo "✓ $plugin"
                 loaded=$((loaded + 1))
               else
@@ -394,7 +391,7 @@ jobs:
                 failed=$((failed + 1))
               fi
             elif [ "$plugin" = "FastAsyncWorldEdit" ]; then
-              if echo "$logs" | grep -qi "FastAsyncWorldEdit\|FAWE"; then
+              if grep -qi "FastAsyncWorldEdit\|FAWE" <<< "$logs"; then
                 echo "✓ $plugin"
                 loaded=$((loaded + 1))
               else
@@ -402,14 +399,14 @@ jobs:
                 failed=$((failed + 1))
               fi
             elif [ "$plugin" = "QuickShop" ]; then
-              if echo "$logs" | grep -qi "QuickShop\|Hikari"; then
+              if grep -qi "QuickShop\|Hikari" <<< "$logs"; then
                 echo "✓ $plugin"
                 loaded=$((loaded + 1))
               else
                 echo "✗ $plugin"
                 failed=$((failed + 1))
               fi
-            elif echo "$logs" | grep -qi "\[$plugin\].*Enabling"; then
+            elif grep -qi "\[$plugin\].*Enabling" <<< "$logs"; then
               echo "✓ $plugin"
               loaded=$((loaded + 1))
             else
@@ -423,13 +420,13 @@ jobs:
           echo ""
 
           # Check for critical errors
-          error_count=$(echo "$logs" | grep -ci "error\|exception" | head -1 || echo "0")
+          error_count=$(grep -ci "error\|exception" <<< "$logs" || true)
           echo "Errors/Exceptions in logs: $error_count"
 
           if [ "$error_count" -gt 10 ]; then
             echo ""
             echo "Notable errors:"
-            echo "$logs" | grep -i "error\|exception" | grep -v "No errors" | head -10
+            grep -i "error\|exception" <<< "$logs" | grep -v "No errors" | sed -n '1,10p' || true
           fi
 
           echo ""
@@ -451,10 +448,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Download image artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: docker-image
           path: /tmp
@@ -464,10 +461,10 @@ jobs:
           docker load -i /tmp/lumo-server.tar
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Log in to Container Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -475,7 +472,7 @@ jobs:
 
       - name: Extract metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
